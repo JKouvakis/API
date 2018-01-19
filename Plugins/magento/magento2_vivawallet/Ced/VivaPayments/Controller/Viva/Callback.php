@@ -60,9 +60,8 @@ class Callback extends AppAction
     public function execute()
     {
         try {	
-			$this->_success();
-			$this->paymentAction();
-
+            $this->_success();
+            $this->paymentAction();
         } catch (Exception $e) {
             return $this->_failure();
         }
@@ -72,93 +71,91 @@ class Callback extends AppAction
         return $this->_objectManager->get('Magento\Checkout\Model\Session')->getLastRealOrderId();
     }
 	
-	protected function paymentAction()
-	{
-		$payment_order = $this->getRequest()->getParam('s');
-		$transactionId = $this->getRequest()->getParam('t');
+    protected function paymentAction()
+    {
+        $payment_order = $this->getRequest()->getParam('s');
+        $transactionId = $this->getRequest()->getParam('t');
        
-		$OrderCode = $payment_order;	
-		$Lang = $this->getRequest()->getParam('Lang');
+        $OrderCode = $payment_order;	
+        $Lang = $this->getRequest()->getParam('Lang');
         $order_id = $this->getOrderId();
         $update_order = $this->_objectManager->create('Ced\VivaPayments\Model\VivaPayments')->load($OrderCode, 'ordercode');
         $this->_loadOrder($order_id);
 
-		$MerchantID = $this->_objectManager->create('\Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/paymentmethod/merchantid');
+        $MerchantID = $this->_objectManager->create('\Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/paymentmethod/merchantid');
 	
         $APIKey =  $this->_objectManager->create('\Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/paymentmethod/merchantpass');
 		
         $request = $this->_objectManager->create('\Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/paymentmethod/transaction_url');
 		
-		$getargs = '?ordercode='.urlencode($OrderCode);
+        $getargs = '?ordercode='.urlencode($OrderCode);
 
-		$session = curl_init($request);
+        $session = curl_init($request);
 
-		curl_setopt($session, CURLOPT_HTTPGET, true);
-		curl_setopt($session, CURLOPT_URL, $request . $getargs);
-		curl_setopt($session, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($session, CURLOPT_USERPWD, $MerchantID.':'.$APIKey);
-		curl_setopt($session, CURLOPT_SSL_CIPHER_LIST, 'TLSv1');
+        curl_setopt($session, CURLOPT_HTTPGET, true);
+        curl_setopt($session, CURLOPT_URL, $request . $getargs);
+        curl_setopt($session, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($session, CURLOPT_USERPWD, $MerchantID.':'.$APIKey);
+        curl_setopt($session, CURLOPT_SSL_CIPHER_LIST, 'TLSv1');
 
-		$response = curl_exec($session);
-		curl_close($session);
-		try {
-				
-			if(is_object(json_decode($response))){
-			  	$resultObj=json_decode($response);
-			}
-		} catch( Exception $e ) {
-			echo $e->getMessage();
-		}
+        $response = curl_exec($session);
+        curl_close($session);
+        try {
+            if(is_object(json_decode($response))){
+                $resultObj=json_decode($response);
+            }
+        } catch( Exception $e ) {
+            echo $e->getMessage();
+        }
 
-		if ($resultObj->ErrorCode==0){
-			if(sizeof($resultObj->Transactions) > 0) {
-				foreach ($resultObj->Transactions as $t){
-					$TransactionId = $t->TransactionId;
-					$Amount = $t->Amount;
-					$StatusId = $t->StatusId;
-					$CustomerTrns = $t->CustomerTrns ;
+	$StatusId = '';
+        if ($resultObj->ErrorCode==0){
+            if(sizeof($resultObj->Transactions) > 0) {
+                foreach ($resultObj->Transactions as $t){
+                    $TransactionId = $t->TransactionId;
+                    $Amount = $t->Amount;
+                    $StatusId = $t->StatusId;
+                    $CustomerTrns = $t->CustomerTrns ;
                     $message = "Transactions completed Successfully";
                     $update_order->setOrderState('paid')->save();
-				}
-			} else {
-                 $update_order->setOrderState('failed')->save();
-				$message = 'No transactions found. Make sure the order code exists and is created by your account.';
-			}
-		} else {
+                }
+            } else {
+                $update_order->setOrderState('failed')->save();
+                $message = 'No transactions found. Make sure the order code exists and is created by your account.';
+            }
+        } else {
             $update_order->setOrderState('failed')->save();
-			$message = 'The following error occured: <strong>' . $resultObj->ErrorCode . '</strong>, ' . $resultObj->ErrorText;
-		}
+            $message = 'The following error occured: <strong>' . $resultObj->ErrorCode . '</strong>, ' . $resultObj->ErrorText;
+        }
         
-		if(strtoupper($StatusId) == 'F')
-		{	
-    		$this->_registerPaymentCapture($TransactionId, $Amount, $message);
-    		$redirectUrl = $this->_paymentMethod->getSuccessUrl();
-    		$this->_redirect($redirectUrl);
-		}
-		else
-		{
-			$this->_createVivaPaymentsComment($message);
+	$txMsg = '';
+        if(strtoupper($StatusId) == 'F') {	
+            $this->_registerPaymentCapture($TransactionId, $Amount, $message);
+            $redirectUrl = $this->_paymentMethod->getSuccessUrl();
+            $this->_redirect($redirectUrl);
+        }
+        else
+        {
+            $this->_createVivaPaymentsComment($message);
             $this->_order->cancel()->save();
-			$this->messageManager->addError("<strong>Error:</strong> $txMsg <br/>");
-			$redirectUrl = $this->_paymentMethod->getCancelUrl();
-			$this->_redirect($redirectUrl);
-		}		
-		
-	}
+            $this->messageManager->addError("<strong>Error:</strong> $txMsg <br/>");
+            $redirectUrl = $this->_paymentMethod->getCancelUrl();
+            $this->_redirect($redirectUrl);
+        }		
+    }
 	
     protected function _registerPaymentCapture($transactionId, $amount, $message)
     {
         $payment = $this->_order->getPayment();
-		
-		
+
         $payment->setTransactionId($transactionId)       
-                ->setPreparedMessage($this->_createVivaPaymentsComment($message))
-                ->setShouldCloseParentTransaction(false)
-                ->setIsTransactionClosed(0)
-                ->registerCaptureNotification(
-                    $amount,
-                    true 
-                );
+            ->setPreparedMessage($this->_createVivaPaymentsComment($message))
+            ->setShouldCloseParentTransaction(false)
+            ->setIsTransactionClosed(0)
+            ->registerCaptureNotification(
+                $amount,
+                true 
+            );
 
         $this->_order->save();
 
